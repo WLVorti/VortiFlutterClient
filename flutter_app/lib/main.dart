@@ -30,7 +30,6 @@ void main() async {
   await MessageCache.init();
   await ChatCache.init();
   await HiddenChats.init();
-  await CryptoService.init();
 
   runApp(const VortiApp());
 }
@@ -275,11 +274,11 @@ class _VortiAppState extends State<VortiApp> {
   }
 
   Future<void> _ensureE2EE() async {
-    if (await CryptoService.init()) return;
-    if (!mounted) return;
-
     final uid = _api.userId;
     if (uid == null) return;
+    if (await CryptoService.initForUser(uid)) return;
+    if (!mounted) return;
+
     await showDialog<void>(
       context: context,
       barrierDismissible: false,

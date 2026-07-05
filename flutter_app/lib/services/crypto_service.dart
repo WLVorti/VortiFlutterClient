@@ -39,18 +39,19 @@ Uint8List _pbkdf2(String password, List<int> salt, int iterations, int keyLength
 class CryptoService {
   static final _storage = const FlutterSecureStorage();
 
-  static const _seedKey = 'e2ee_seed';
-  static const _pubKeysKey = 'e2ee_pub_keys';
-
+  static String? _currentUserId;
   static PrivateKey? _ourKey;
-
   static Map<String, String> _pubKeyCache = {};
   static final Map<String, Box> _boxCache = {};
 
+  static String _seedKeyFor(String userId) => 'e2ee_seed_$userId';
+  static String _pubKeysKeyFor(String userId) => 'e2ee_pub_keys_$userId';
+
   static Future<void> _loadPubKeyCache() async {
-    if (_pubKeyCache.isNotEmpty) return;
+    if (_currentUserId == null) return;
+    _pubKeyCache = {};
     try {
-      final stored = await _storage.read(key: _pubKeysKey);
+      final stored = await _storage.read(key: _pubKeysKeyFor(_currentUserId!));
       if (stored != null) {
         _pubKeyCache = Map<String, String>.from(jsonDecode(stored));
       }
@@ -60,33 +61,40 @@ class CryptoService {
   }
 
   static Future<void> _savePubKeyCache() async {
+    if (_currentUserId == null) return;
     try {
-      await _storage.write(key: _pubKeysKey, value: jsonEncode(_pubKeyCache));
+      await _storage.write(key: _pubKeysKeyFor(_currentUserId!), value: jsonEncode(_pubKeyCache));
     } catch (_) {}
   }
 
   static bool get isReady => _ourKey != null;
+  static String? get currentUserId => _currentUserId;
 
-  static Future<bool> hasSeed() async {
-    final existing = await _storage.read(key: _seedKey);
-    return existing != null;
+  static Future<bool> hasSeed(String userId) async {
+    final stored = await _storage.read(key: _seedKeyFor(userId));
+    return stored != null;
   }
 
-  static Future<bool> init() async {
-    final existing = await _storage.read(key: _seedKey);
-    if (existing != null) {
-      final seed = base64Decode(existing);
+  static Future<bool> initForUser(String userId) async {
+    _currentUserId = userId;
+    _boxCache.clear();
+    final stored = await _storage.read(key: _seedKeyFor(userId));
+    if (stored != null) {
+      final seed = base64Decode(stored);
       _ourKey = PrivateKey.fromSeed(Uint8List.fromList(seed));
     }
     await _loadPubKeyCache();
-    return existing != null;
+    return _ourKey != null;
   }
 
   static Future<void> initWithPassphrase(String passphrase, String userId) async {
+    _currentUserId = userId;
+    _boxCache.clear();
     final salt = utf8.encode('$userId:vortimes-e2ee-v1');
     final seed = _pbkdf2(passphrase, salt, _pbkdf2Iterations, 32);
     _ourKey = PrivateKey.fromSeed(Uint8List.fromList(seed));
-    await _storage.write(key: _seedKey, value: base64Encode(seed));
+    await _storage.write(key: _seedKeyFor(userId), value: base64Encode(seed));
+    await _loadPubKeyCache();
   }
 
   static String? get publicKeyB64 {

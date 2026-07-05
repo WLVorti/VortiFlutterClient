@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -272,9 +273,35 @@ class _MediaTabState extends State<_MediaTab> {
         crossAxisSpacing: 4,
         mainAxisSpacing: 4,
       ),
-      itemCount: _assets!.length,
+      itemCount: _assets!.length + 1,
       itemBuilder: (_, i) {
-        final asset = _assets![i];
+        if (i == 0) {
+          return GestureDetector(
+            onTap: _openCamera,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.grey[850],
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.camera_alt, size: 32,
+                      color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Camera',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        final asset = _assets![i - 1];
         final isSelected = widget.selectedAssets.contains(asset);
         return GestureDetector(
           onTap: () => _toggleAsset(asset),
@@ -328,6 +355,21 @@ class _MediaTabState extends State<_MediaTab> {
         );
       },
     );
+  }
+
+  Future<void> _openCamera() async {
+    final picker = ImagePicker();
+    final photo = await picker.pickImage(source: ImageSource.camera);
+    if (photo != null && mounted) {
+      final ext = photo.path.split('.').last.toLowerCase();
+      Navigator.pop(context, [
+        SelectedMedia(
+          file: File(photo.path),
+          name: 'camera_${DateTime.now().millisecondsSinceEpoch}.$ext',
+          mimeType: 'image/$ext',
+        ),
+      ]);
+    }
   }
 
   String _formatDuration(int seconds) {

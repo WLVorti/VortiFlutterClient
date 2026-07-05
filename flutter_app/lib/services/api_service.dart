@@ -1040,6 +1040,32 @@ class ApiService {
     _wsChannel?.sink.add(jsonEncode({'type': 'read', 'messageId': messageId}));
   }
 
+  void sendReaction(String messageId, String emoji, String action) {
+    _wsChannel?.sink.add(jsonEncode({
+      'type': 'react',
+      'messageId': messageId,
+      'emoji': emoji,
+      'action': action,
+    }));
+  }
+
+  Future<Map<String, List<Map<String, dynamic>>>> getChatReactions(String chatId) async {
+    try {
+      final res = await _client.get(
+        Uri.parse('$baseUrl/chats/$chatId/reactions'),
+        headers: _headers,
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['status'] == 'success' && data['reactions'] != null) {
+          final raw = data['reactions'] as Map<String, dynamic>;
+          return raw.map((k, v) => MapEntry(k, List<Map<String, dynamic>>.from(v)));
+        }
+      }
+    } catch (_) {}
+    return {};
+  }
+
   // ==================== Files ====================
 
   Future<Map<String, String>?> uploadFile(File file) async {
@@ -1245,6 +1271,17 @@ class ApiService {
     sendFileViaWs(chatId, fileId, replyTo: replyTo, mimeType: mimeType);
   }
 
+  void sendSticker(String chatId, String stickerId, {String? tempId}) {
+    _wsChannel?.sink.add(
+      jsonEncode({
+        'type': 'sendSticker',
+        'chatId': chatId,
+        'stickerId': stickerId,
+        if (tempId != null) 'tempId': tempId,
+      }),
+    );
+  }
+
   // ==================== Messages ====================
 
   Future<bool> editMessage(String messageId, String newText) async {
@@ -1293,7 +1330,7 @@ class ApiService {
 
   // ==================== Profile ====================
 
-  Future<Profile?> updateProfile({String? displayName, String? bio, String? username, String? email}) async {
+  Future<Profile?> updateProfile({String? displayName, String? bio, String? username, String? email, String? tags}) async {
     try {
       final res = await _requestWithRefresh(() => _client.put(
         Uri.parse('$baseUrl/profile'),
@@ -1303,6 +1340,7 @@ class ApiService {
           if (bio != null) 'bio': bio,
           if (username != null) 'username': username,
           if (email != null) 'email': email,
+          if (tags != null) 'tags': tags,
         }),
       ));
 
@@ -1396,6 +1434,131 @@ class ApiService {
     }
   }
 
+  Future<List<StickerPack>> getStickerPacks() async {
+    print('[API] getStickerPacks called');
+    try {
+      final res = await _requestWithRefresh(() => _client.get(
+        Uri.parse('$baseUrl/sticker-packs'),
+        headers: _headers,
+      ));
+      print('[API] getStickerPacks status: ${res.statusCode}');
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        print('[API] getStickerPacks keys: ${data.keys} packs_len=${(data['packs'] as List?)?.length}');
+        if (data['status'] == 'success' && data['packs'] != null) {
+          return (data['packs'] as List).map((p) => StickerPack.fromJson(p)).toList();
+        }
+      }
+    } catch (e) {
+      print('[API] Get sticker packs error: $e');
+    }
+    return [];
+  }
+
+  Future<StickerPack?> getStickerPack(String id) async {
+    try {
+      final res = await _client.get(
+        Uri.parse('$baseUrl/sticker-packs/$id'),
+        headers: _headers,
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final pack = StickerPack.fromJson(data['pack']);
+        final stickers = (data['stickers'] as List).map((s) => Sticker.fromJson(s)).toList();
+        return StickerPack(
+          id: pack.id,
+          name: pack.name,
+          authorId: pack.authorId,
+          createdAt: pack.createdAt,
+          stickers: stickers,
+        );
+      }
+    } catch (e) {
+      print('Get sticker pack error: $e');
+    }
+    return null;
+  }
+
+  Future<StickerPack?> createStickerPack(String name) async {
+    try {
+      final res = await _requestWithRefresh(() => _client.post(
+        Uri.parse('$baseUrl/sticker-packs'),
+        headers: {..._headers, 'Content-Type': 'application/json'},
+        body: jsonEncode({'name': name}),
+      ));
+      if (res.statusCode == 201) {
+        final data = jsonDecode(res.body);
+        return StickerPack.fromJson(data['pack']);
+      }
+    } catch (e) {
+      print('Create sticker pack error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> deleteStickerPack(String id) async {
+    try {
+      final res = await _requestWithRefresh(() => _client.delete(
+        Uri.parse('$baseUrl/sticker-packs/$id'),
+        headers: _headers,
+      ));
+      return res.statusCode == 200;
+    } catch (e) {
+      print('Delete sticker pack error: $e');
+      return false;
+    }
+  }
+
+  Future<Sticker?> addSticker(String packId, String imagePath, String emoji) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/sticker-packs/$packId/stickers'),
+      );
+      request.headers.addAll({'Authorization': 'Bearer $_token'});
+      request.fields['emoji'] = emoji;
+      request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        return Sticker.fromJson(data['sticker']);
+      }
+    } catch (e) {
+      print('Add sticker error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> removeSticker(String packId, String stickerId) async {
+    try {
+      final res = await _requestWithRefresh(() => _client.delete(
+        Uri.parse('$baseUrl/sticker-packs/$packId/stickers/$stickerId'),
+        headers: _headers,
+      ));
+      return res.statusCode == 200;
+    } catch (e) {
+      print('Remove sticker error: $e');
+      return false;
+    }
+  }
+
+  Future<StickerPack?> copyStickerPack(String packId) async {
+    try {
+      final res = await _requestWithRefresh(() => _client.post(
+        Uri.parse('$baseUrl/sticker-packs/$packId/copy'),
+        headers: _headers,
+      ));
+      if (res.statusCode == 201) {
+        final data = jsonDecode(res.body);
+        return StickerPack.fromJson(data['pack']);
+      }
+    } catch (e) {
+      print('Copy sticker pack error: $e');
+    }
+    return null;
+  }
+
   Future<Profile?> getUserProfile(String userId) async {
     try {
       final res = await _client.get(
@@ -1413,6 +1576,37 @@ class ApiService {
       print('Get user profile error: $e');
     }
     return null;
+  }
+
+  Future<String> getSearchTags() async {
+    try {
+      final res = await _requestWithRefresh(() => _client.get(
+        Uri.parse('$baseUrl/profile/tags'),
+        headers: _headers,
+      ));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return data['tags'] as String? ?? '';
+      }
+    } catch (e) {
+      print('Get search tags error: $e');
+    }
+    return '';
+  }
+
+  Future<bool> updateSearchTags(String tags) async {
+    try {
+      final res = await _requestWithRefresh(() => _client.put(
+        Uri.parse('$baseUrl/profile/tags'),
+        headers: _headers,
+        body: jsonEncode({'tags': tags}),
+      ));
+      return res.statusCode == 200;
+    } catch (e) {
+      print('Update search tags error: $e');
+      return false;
+    }
   }
 
   void disconnect() {

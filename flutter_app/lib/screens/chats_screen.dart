@@ -10,6 +10,7 @@ import 'chat_screen.dart';
 import 'auth_screen.dart';
 import 'profile_screen.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/user_search_sheet.dart';
 
 class ChatsScreen extends StatefulWidget {
   final ApiService api;
@@ -140,153 +141,22 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   Future<void> _createChat() async {
-    final searchController = TextEditingController();
-    List<User> users = [];
-    Timer? _debounce;
-
-    await showModalBottomSheet(
+    await UserSearchSheet.show(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      api: widget.api,
+      config: const UserSearchSheetConfig(
+        title: 'New Chat',
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Drag handle
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                child: Row(
-                  children: [
-                    Text(
-                      AppLocalizations.of(context).newChat,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: TextField(
-                  controller: searchController,
-                  decoration: InputDecoration(
-                    hintText: AppLocalizations.of(context).searchUsers,
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: searchController.text.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear, size: 20),
-                            onPressed: () {
-                              searchController.clear();
-                              setSheetState(() => users = []);
-                            },
-                          )
-                        : null,
-                  ),
-                  onChanged: (value) {
-                    _debounce?.cancel();
-                    if (value.length < 2) {
-                      setSheetState(() => users = []);
-                      return;
-                    }
-                    _debounce = Timer(const Duration(milliseconds: 300), () async {
-                      final result = await widget.api.searchUsers(value);
-                      if (searchController.text == value) {
-                        setSheetState(() => users = result);
-                      }
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (users.isEmpty && searchController.text.length >= 2)
-                Padding(
-                  padding: const EdgeInsets.all(40),
-                  child: Text(AppLocalizations.of(context).usersNotFound,
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                )
-              else
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    itemCount: users.length,
-                    itemBuilder: (_, i) => Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      elevation: 0,
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ListTile(
-                        leading: Stack(
-                          children: [
-                            _buildAvatar(users[i].avatarUrl, users[i].username[0], userId: users[i].id),
-                            if (_onlineUsers.contains(users[i].id))
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: Container(
-                                  width: 12,
-                                  height: 12,
-                                  decoration: BoxDecoration(
-                                    color: Colors.green,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: Theme.of(context).colorScheme.surface, width: 2),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        title: Text(users[i].username, style: const TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: Text(
-                          _onlineUsers.contains(users[i].id) ? AppLocalizations.of(context).online : AppLocalizations.of(context).offline,
-                          style: TextStyle(
-                            color: _onlineUsers.contains(users[i].id) ? Colors.green : Colors.grey,
-                            fontSize: 13,
-                          ),
-                        ),
-                        trailing: Icon(Icons.arrow_forward_ios, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        onTap: () async {
-                          final chatId = await widget.api.createChat('direct', [users[i].id]);
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          if (chatId != null && mounted) {
-                            _loadData();
-                            _openChat(chatId, users[i].username);
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 12),
-            ],
-          ),
-        ),
-      ),
-    ).whenComplete(() => _debounce?.cancel());
+      onSubmitted: (users) async {
+        if (users.isEmpty) return;
+        final user = users.first;
+        final chatId = await widget.api.createChat('direct', [user.id]);
+        if (chatId != null && mounted) {
+          _loadData();
+          _openChat(chatId, user.username);
+        }
+      },
+    );
   }
 
   void _openChat(String chatId, String name) {

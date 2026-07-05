@@ -84,6 +84,7 @@ class Profile {
   final int createdAt;
   final int? lastSeenAt;
   final String email;
+  final String tags;
 
   Profile({
     required this.id,
@@ -94,6 +95,7 @@ class Profile {
     required this.createdAt,
     this.lastSeenAt,
     this.email = '',
+    this.tags = '',
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) {
@@ -106,10 +108,11 @@ class Profile {
       createdAt: json['createdAt'] ?? json['created_at'] ?? 0,
       lastSeenAt: json['last_seen_at'],
       email: json['email'] ?? '',
+      tags: json['tags'] ?? '',
     );
   }
 
-  Profile copyWith({String? displayName, String? bio, String? avatarUrl}) {
+  Profile copyWith({String? displayName, String? bio, String? avatarUrl, String? tags}) {
     return Profile(
       id: id,
       username: username,
@@ -118,6 +121,7 @@ class Profile {
       avatarUrl: avatarUrl ?? this.avatarUrl,
       createdAt: createdAt,
       email: email,
+      tags: tags ?? this.tags,
     );
   }
 }
@@ -182,6 +186,66 @@ class Chat {
 
 enum MessageStatus { sending, sent, delivered, read }
 
+class Sticker {
+  final String id;
+  final String packId;
+  final String imageUrl;
+  final String emoji;
+  final int createdAt;
+
+  Sticker({
+    required this.id,
+    required this.packId,
+    required this.imageUrl,
+    this.emoji = '',
+    required this.createdAt,
+  });
+
+  factory Sticker.fromJson(Map<String, dynamic> json) {
+    return Sticker(
+      id: json['id'] ?? '',
+      packId: json['packId'] ?? json['pack_id'] ?? '',
+      imageUrl: json['imageUrl'] ?? json['image_url'] ?? '',
+      emoji: json['emoji'] ?? '',
+      createdAt: json['createdAt'] ?? json['created_at'] ?? 0,
+    );
+  }
+}
+
+class StickerPack {
+  final String id;
+  final String name;
+  final String authorId;
+  final String? coverUrl;
+  final int stickerCount;
+  final int createdAt;
+  final List<Sticker>? stickers;
+
+  StickerPack({
+    required this.id,
+    required this.name,
+    required this.authorId,
+    this.coverUrl,
+    this.stickerCount = 0,
+    required this.createdAt,
+    this.stickers,
+  });
+
+  factory StickerPack.fromJson(Map<String, dynamic> json) {
+    return StickerPack(
+      id: json['id'] ?? '',
+      name: json['name'] ?? '',
+      authorId: json['authorId'] ?? json['author_id'] ?? '',
+      coverUrl: json['coverUrl'] ?? json['cover_url'],
+      stickerCount: json['stickerCount'] ?? json['sticker_count'] ?? 0,
+      createdAt: json['createdAt'] ?? json['created_at'] ?? 0,
+      stickers: json['stickers'] != null
+          ? (json['stickers'] as List).map((s) => Sticker.fromJson(s)).toList()
+          : null,
+    );
+  }
+}
+
 class Message {
   final String id;
   final String chatId;
@@ -192,6 +256,10 @@ class Message {
   final String? replyUsername;
   final String? fileId;
   final String? fileMimeType;
+  final String? stickerId;
+  final String? stickerImageUrl;
+  final String? stickerEmoji;
+  final String? stickerPackId;
   final int createdAt;
   final bool isDeleted;
   final bool isEdited;
@@ -210,6 +278,10 @@ class Message {
     this.replyUsername,
     this.fileId,
     this.fileMimeType,
+    this.stickerId,
+    this.stickerImageUrl,
+    this.stickerEmoji,
+    this.stickerPackId,
     required this.createdAt,
     this.isDeleted = false,
     this.isEdited = false,
@@ -243,6 +315,10 @@ class Message {
       replyUsername: replyData?['replyUser'],
       fileId: json['file_id'],
       fileMimeType: json['file_mime_type'],
+      stickerId: json['sticker_id'] ?? json['stickerId'],
+      stickerImageUrl: json['sticker_image_url'] ?? json['stickerImageUrl'],
+      stickerEmoji: json['sticker_emoji'] ?? json['stickerEmoji'],
+      stickerPackId: json['sticker_pack_id'] ?? json['stickerPackId'],
       createdAt: json['created_at'] ?? 0,
       isDeleted: json['is_deleted'] ?? false,
       isEdited: json['is_edited'] ?? false,
@@ -264,6 +340,10 @@ class Message {
       'reply_username': replyUsername,
       'file_id': fileId,
       'file_mime_type': fileMimeType,
+      'sticker_id': stickerId,
+      'sticker_image_url': stickerImageUrl,
+      'sticker_emoji': stickerEmoji,
+      'sticker_pack_id': stickerPackId,
       'created_at': createdAt,
       'is_deleted': isDeleted,
       'is_edited': isEdited,
@@ -292,6 +372,10 @@ class Message {
       replyText: replyText ?? this.replyText,
       replyUsername: replyUsername,
       fileId: fileId,
+      stickerId: stickerId,
+      stickerImageUrl: stickerImageUrl,
+      stickerEmoji: stickerEmoji,
+      stickerPackId: stickerPackId,
       createdAt: createdAt,
       isDeleted: isDeleted ?? this.isDeleted,
       isEdited: isEdited ?? this.isEdited,

@@ -11,6 +11,7 @@ import '../utils/avatar_utils.dart';
 import '../services/theme_provider.dart';
 import '../services/locale_provider.dart';
 import '../services/wallpaper_service.dart';
+import '../services/crypto_service.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/falling_icons_background.dart';
 import '../models/models.dart';
@@ -43,6 +44,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _displayNameController = TextEditingController();
   final _bioController = TextEditingController();
   final _emailController = TextEditingController();
+  final _tagsController = TextEditingController();
   final _themeProvider = ThemeProvider();
 
   @override
@@ -55,6 +57,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _displayNameController.text = _profile!.displayName ?? '';
       _bioController.text = _profile!.bio ?? '';
       _emailController.text = _profile!.email ?? '';
+      _tagsController.text = _profile!.tags ?? '';
     }
     _loadProfile();
     _loadAccounts();
@@ -169,6 +172,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _displayNameController.text = profile?.displayName ?? '';
           _bioController.text = profile?.bio ?? '';
           _emailController.text = profile?.email ?? '';
+          _tagsController.text = profile?.tags ?? '';
         });
       }
     } catch (e) {
@@ -192,6 +196,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         displayName: _displayNameController.text,
         bio: _bioController.text,
         email: email.isNotEmpty ? email : null,
+        tags: _tagsController.text,
       );
       if (mounted) {
         setState(() {
@@ -347,7 +352,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          16, 16, 16,
+          MediaQuery.of(context).padding.bottom + kBottomNavigationBarHeight + 16,
+        ),
         children: [
           if (_profile != null)
             Center(
@@ -491,6 +499,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 maxLines: 3,
                 decoration: InputDecoration(
                   labelText: AppLocalizations.of(context).bio,
+                  labelStyle: theme.textTheme.bodyMedium?.copyWith(
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  alignLabelWithHint: true,
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+          Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
+              return TextField(
+                controller: _tagsController,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  labelText: 'Search Tags',
+                  helperText: 'hobbies, city, profession, gaming nickname',
                   labelStyle: theme.textTheme.bodyMedium?.copyWith(
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1105,7 +1131,132 @@ class _AccountsBottomSheetState extends State<_AccountsBottomSheet> {
     await widget.themeProvider.loadTheme();
     WallpaperService().setCurrentUser(account.id);
     await WallpaperService().load();
+
+    if (!await CryptoService.hasSeed(account.id)) {
+      if (!context.mounted) return;
+      final phrase = await _showPassphraseDialog(context, account.id);
+      if (phrase != null) {
+        await CryptoService.initWithPassphrase(phrase, account.id);
+      }
+    } else {
+      await CryptoService.initForUser(account.id);
+    }
+    await CryptoService.uploadPublicKey(widget.api);
+
     widget.onAccountSwitched();
+  }
+
+  Future<String?> _showPassphraseDialog(BuildContext ctx, String userId) async {
+    final controller = TextEditingController();
+    final confirmController = TextEditingController();
+    bool obscure = true;
+    bool isNew = false;
+    String? error;
+
+    final result = await showDialog<String?>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> submit() async {
+              final phrase = controller.text.trim();
+              if (phrase.isEmpty) {
+                setDialogState(() => error = 'Enter a passphrase');
+                return;
+              }
+              if (phrase.length < 4) {
+                setDialogState(() => error = 'At least 4 characters');
+                return;
+              }
+              if (isNew && confirmController.text.trim() != phrase) {
+                setDialogState(() => error = 'Passphrases do not match');
+                return;
+              }
+              Navigator.of(context).pop(phrase);
+            }
+
+            final theme = Theme.of(context);
+            return AlertDialog(
+              title: Text(isNew ? 'Set recovery passphrase' : 'Enter recovery passphrase'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isNew
+                          ? 'This passphrase restores your encryption keys on a new device. '
+                              'Save it securely — without it, old private messages become unreadable.'
+                          : 'Enter the passphrase you set on your previous device to restore encryption keys.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: controller,
+                      obscureText: obscure,
+                      decoration: const InputDecoration(
+                        labelText: 'Recovery passphrase',
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (_) {
+                        if (error != null) setDialogState(() => error = null);
+                      },
+                    ),
+                    if (isNew) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: confirmController,
+                        obscureText: obscure,
+                        decoration: const InputDecoration(
+                          labelText: 'Confirm passphrase',
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (_) {
+                          if (error != null) setDialogState(() => error = null);
+                        },
+                      ),
+                    ],
+                    if (error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(error!, style: TextStyle(color: theme.colorScheme.error)),
+                      ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: !obscure,
+                          onChanged: (v) => setDialogState(() => obscure = !(v ?? false)),
+                        ),
+                        GestureDetector(
+                          onTap: () => setDialogState(() => obscure = !obscure),
+                          child: const Text('Show passphrase'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                if (!isNew)
+                  TextButton(
+                    onPressed: () => setDialogState(() => isNew = true),
+                    child: const Text('First time — set new'),
+                  ),
+                TextButton(
+                  onPressed: () => isNew ? setDialogState(() => isNew = false) : submit(),
+                  child: Text(isNew ? 'Back' : 'Continue'),
+                ),
+                if (isNew)
+                  FilledButton(onPressed: submit, child: const Text('Set & Continue')),
+              ],
+            );
+          },
+        );
+      },
+    );
+    return result;
   }
 
   Future<void> _addAccount() async {

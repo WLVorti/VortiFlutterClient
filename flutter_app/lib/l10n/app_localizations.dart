@@ -255,6 +255,8 @@ class AppLocalizations {
     ];
     return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
+
+  String get quickReaction => isRu ? 'Быстрая реакция' : 'Quick reaction';
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

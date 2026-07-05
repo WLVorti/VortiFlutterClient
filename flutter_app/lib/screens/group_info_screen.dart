@@ -9,6 +9,7 @@ import '../services/api_service.dart';
 import '../models/models.dart';
 import '../utils/avatar_utils.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/user_search_sheet.dart';
 
 class GroupInfoScreen extends StatefulWidget {
   final ApiService api;
@@ -428,72 +429,19 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   void _showAddParticipantDialog() async {
-    final searchController = TextEditingController();
-    final users = <User>[];
-
-    showModalBottomSheet(
+    final currentIds = (_participants ?? []).map<String>((p) => p.id as String).toSet();
+    await UserSearchSheet.show(
       context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-            left: 16,
-            right: 16,
-            top: 16,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                AppLocalizations.of(context).addParticipant,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: searchController,
-                decoration: InputDecoration(
-                  hintText: AppLocalizations.of(context).searchUsers,
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (value) async {
-                  if (value.length >= 2) {
-                    final result = await widget.api.searchUsers(value);
-                    if (ctx.mounted) {
-                      setSheetState(() {
-                          users.clear();
-                          users.addAll(result);
-                        });
-                    }
-                  }
-                },
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 200,
-                child: ListView.builder(
-                  itemCount: users.length,
-                  itemBuilder: (_, i) => ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: colorFromId(users[i].id),
-                      child: Text(users[i].username[0]),
-                    ),
-                    title: Text(users[i].username),
-                    onTap: () async {
-                      await widget.api.addParticipant(
-                        widget.chatId,
-                        users[i].id,
-                      );
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      _loadData();
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+      api: widget.api,
+      config: UserSearchSheetConfig(
+        title: AppLocalizations.of(context).addParticipant,
+        excludeIds: currentIds,
       ),
+      onSubmitted: (users) async {
+        if (users.isEmpty) return;
+        await widget.api.addParticipant(widget.chatId, users.first.id);
+        _loadData();
+      },
     );
   }
 

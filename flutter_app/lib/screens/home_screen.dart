@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/chat_cache.dart';
@@ -14,6 +15,7 @@ import 'auth_screen.dart';
 import 'profile_screen.dart';
 import 'user_profile_screen.dart';
 import 'group_info_screen.dart';
+import '../widgets/user_search_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
   final ApiService api;
@@ -27,6 +29,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   final PageController _pageController = PageController();
+  final GlobalKey<_ChatsTabState> _chatsTabKey = GlobalKey<_ChatsTabState>();
 
   @override
   void dispose() {
@@ -42,36 +45,70 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
       body: PageView(
         controller: _pageController,
         onPageChanged: (index) => setState(() => _currentIndex = index),
         children: [
-          ChatsTab(api: widget.api),
+          ChatsTab(key: _chatsTabKey, api: widget.api),
           CommunitiesTab(api: widget.api),
           ProfileTab(api: widget.api),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: _onTabTapped,
-        destinations: [
-          NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
-            label: AppLocalizations.of(context).chats,
+      bottomNavigationBar: Stack(
+        children: [
+          Positioned.fill(
+            child: ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [
+                        Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
+                        Theme.of(context).colorScheme.surface.withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.group_outlined),
-            selectedIcon: Icon(Icons.group),
-            label: AppLocalizations.of(context).communities,
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: AppLocalizations.of(context).account,
+          NavigationBar(
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            elevation: 0,
+            selectedIndex: _currentIndex,
+            onDestinationSelected: _onTabTapped,
+            destinations: [
+              NavigationDestination(
+                icon: Icon(Icons.chat_bubble_outline),
+                selectedIcon: Icon(Icons.chat_bubble),
+                label: AppLocalizations.of(context).chats,
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.group_outlined),
+                selectedIcon: Icon(Icons.group),
+                label: AppLocalizations.of(context).communities,
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.person_outline),
+                selectedIcon: Icon(Icons.person),
+                label: AppLocalizations.of(context).account,
+              ),
+            ],
           ),
         ],
-                    ),
+      ),
+      floatingActionButton: _currentIndex == 0
+          ? FloatingActionButton(
+              onPressed: () => _chatsTabKey.currentState?._createChat(),
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 }
@@ -288,121 +325,24 @@ class _ChatsTabState extends State<ChatsTab> with WidgetsBindingObserver {
   }
 
   Future<void> _createChat() async {
-    final searchController = TextEditingController();
-    List<User> users = [];
-
-    await showModalBottomSheet(
+    await UserSearchSheet.show(
       context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-            left: 16,
-            right: 16,
-            top: 16,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                AppLocalizations.of(context).newChat,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: searchController,
-                decoration: InputDecoration(
-                  hintText: AppLocalizations.of(context).searchUsers,
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.search),
-                ),
-                onChanged: (value) async {
-                  if (value.length >= 2) {
-                    final result = await widget.api.searchUsers(value);
-                    setSheetState(() => users = result);
-                  }
-                },
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 200,
-                child: ListView.builder(
-                  itemCount: users.length,
-                  itemBuilder: (_, i) => ListTile(
-                    leading: GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => UserProfileScreen(
-                              api: widget.api,
-                              userId: users[i].id,
-                            ),
-                          ),
-                        );
-                      },
-                      child: Stack(
-                        children: [
-                          _buildAvatar(
-                            users[i].avatarUrl,
-                            users[i].username[0],
-                            userId: users[i].id,
-                          ),
-                          if (_onlineUsers.contains(users[i].id))
-                            Positioned(
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                width: 12,
-                                height: 12,
-                                decoration: BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 2,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    title: Text(users[i].username),
-                    subtitle: _onlineUsers.contains(users[i].id)
-                        ? Text(
-                            AppLocalizations.of(context).online,
-                            style: TextStyle(color: Colors.green),
-                          )
-                        : Text(
-                            AppLocalizations.of(context).offline,
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                    onTap: () async {
-                      final chatId = await widget.api.createChat('direct', [
-                        users[i].id,
-                      ]);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (chatId != null && mounted) {
-                        _loadData();
-                        _openChat(
-                          chatId,
-                          users[i].username,
-                          avatarUrl: users[i].avatarUrl,
-                          otherUserId: users[i].id,
-                        );
-                      }
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
+      api: widget.api,
+      config: const UserSearchSheetConfig(
+        title: 'New Chat',
       ),
+      onSubmitted: (users) async {
+        if (users.isEmpty) return;
+        final user = users.first;
+        final chatId = await widget.api.createChat('direct', [user.id]);
+        if (chatId != null && mounted) {
+          _loadData();
+          _openChat(chatId, user.username,
+            avatarUrl: user.avatarUrl,
+            otherUserId: user.id,
+          );
+        }
+      },
     );
   }
 
@@ -632,10 +572,6 @@ class _ChatsTabState extends State<ChatsTab> with WidgetsBindingObserver {
                           ),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _createChat,
-        child: const Icon(Icons.add),
       ),
     );
   }
@@ -1024,106 +960,206 @@ class _CommunitiesTabState extends State<CommunitiesTab> {
   Future<void> _createGroup() async {
     final nameController = TextEditingController();
     final searchController = TextEditingController();
-    List<User> users = [];
+    var users = <User>[];
     final selectedUsers = <String>{};
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
-builder: (ctx, setSheetState) => Padding(
+        builder: (ctx, setSheetState) => Padding(
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom,
-            left: 16,
-            right: 16,
-            top: 16,
           ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppLocalizations.of(context).newCommunity,
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                const SizedBox(height: 16),
-                TextField(
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: TextField(
                   controller: nameController,
                   decoration: InputDecoration(
                     hintText: AppLocalizations.of(context).communityName,
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.group),
+                    prefixIcon: const Icon(Icons.group),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                   ),
                 ),
-                const SizedBox(height: 16),
-                TextField(
+              ),
+              if (selectedUsers.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: SizedBox(
+                    height: 40,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: selectedUsers.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) {
+                        final id = selectedUsers.elementAt(i);
+                        return Chip(
+                          label: Text(
+                            users.firstWhere((u) => u.id == id, orElse: () => User(id: id, username: id.substring(0, 6), createdAt: 0)).username,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          deleteIcon: const Icon(Icons.close, size: 16),
+                          onDeleted: () => setSheetState(() => selectedUsers.remove(id)),
+                          visualDensity: VisualDensity.compact,
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                child: TextField(
                   controller: searchController,
                   decoration: InputDecoration(
                     hintText: AppLocalizations.of(context).addMembersHint,
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.search),
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 20),
+                            onPressed: () {
+                              searchController.clear();
+                              setSheetState(() => users = []);
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                   ),
-                  onChanged: (value) async {
-                    if (value.length >= 2) {
-                      try {
-                        final result = await widget.api.searchUsers(value);
-                        if (ctx.mounted) {
-                          setSheetState(() => users = result);
-                        }
-                      } catch (e) {
-                        // ignore search errors
-                      }
+                  onChanged: (value) {
+                    if (value.length < 2) {
+                      setSheetState(() => users = []);
+                      return;
                     }
+                    widget.api.searchUsers(value).then((result) {
+                      if (searchController.text == value) {
+                        setSheetState(() => users = result);
+                      }
+                    }).catchError((_) {});
                   },
                 ),
-                const SizedBox(height: 8),
-                if (selectedUsers.isNotEmpty) ...[
-                  Wrap(
-                    spacing: 8,
-                    children: selectedUsers.map((id) {
-                      final user = users.firstWhere((u) => u.id == id, orElse: () => User(id: id, username: AppLocalizations.of(context).user, createdAt: 0));
-                      return Chip(
-                        label: Text(user.username),
-                        onDeleted: () {
-                          setSheetState(() => selectedUsers.remove(id));
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 8),
-                ],
+              ),
+              const SizedBox(height: 8),
+              if (users.isNotEmpty)
                 Flexible(
                   child: ListView.builder(
                     shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     itemCount: users.length,
                     itemBuilder: (_, i) {
                       final user = users[i];
                       final isSelected = selectedUsers.contains(user.id);
-                      return ListTile(
-                        leading: _buildAvatar(user.avatarUrl, user.username[0], userId: user.id),
-                        title: Text(user.username),
-                        trailing: isSelected
-                            ? const Icon(Icons.check_circle, color: Colors.green)
-                            : const Icon(Icons.add_circle_outline),
-                        onTap: () {
-                          setSheetState(() {
-                            if (isSelected) {
-                              selectedUsers.remove(user.id);
-                            } else {
-                              selectedUsers.add(user.id);
-                            }
-                          });
-                        },
+                      final isOnline = _onlineUsers.contains(user.id);
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                        elevation: 0,
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5)
+                            : Theme.of(context).colorScheme.surfaceContainerHighest,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: isSelected
+                              ? BorderSide(color: Theme.of(context).colorScheme.primary, width: 1.5)
+                              : BorderSide.none,
+                        ),
+                        child: ListTile(
+                          leading: Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 22,
+                                backgroundColor: colorFromId(user.id),
+                                backgroundImage: user.avatarUrl != null
+                                    ? CachedNetworkImageProvider(user.avatarUrl!)
+                                    : null,
+                                child: user.avatarUrl == null
+                                    ? Text(
+                                        (user.displayName ?? user.username)[0].toUpperCase(),
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                      )
+                                    : null,
+                              ),
+                              if (isOnline)
+                                Positioned(
+                                  right: 0,
+                                  bottom: 0,
+                                  child: Container(
+                                    width: 12,
+                                    height: 12,
+                                    decoration: BoxDecoration(
+                                      color: Colors.green,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Theme.of(context).colorScheme.surface, width: 2),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          title: Text(
+                            user.displayName ?? user.username,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            '@${user.username}',
+                            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Icon(
+                            isSelected ? Icons.check_circle : Icons.add_circle_outline,
+                            color: isSelected
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          onTap: () {
+                            setSheetState(() {
+                              if (isSelected) {
+                                selectedUsers.remove(user.id);
+                              } else {
+                                selectedUsers.add(user.id);
+                              }
+                            });
+                          },
+                        ),
                       );
                     },
                   ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
+                  child: Column(
+                    children: [
+                      Icon(Icons.search, size: 48,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3)),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Type at least 2 characters to search',
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 16),
-                SizedBox(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: SizedBox(
                   width: double.infinity,
                   child: FilledButton(
                     onPressed: selectedUsers.isEmpty || nameController.text.isEmpty
@@ -1142,9 +1178,8 @@ builder: (ctx, setSheetState) => Padding(
                     child: Text(AppLocalizations.of(context).createCommunity),
                   ),
                 ),
-                const SizedBox(height: 16),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
