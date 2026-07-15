@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:pinenacl/x25519.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -87,11 +88,21 @@ class CryptoService {
     return _ourKey != null;
   }
 
-  static Future<void> initWithPassphrase(String passphrase, String userId) async {
+  static Future<void> initWithPassword(String password, String userId) async {
     _currentUserId = userId;
     _boxCache.clear();
     final salt = utf8.encode('$userId:vortimes-e2ee-v1');
-    final seed = _pbkdf2(passphrase, salt, _pbkdf2Iterations, 32);
+    final seed = _pbkdf2(password, salt, _pbkdf2Iterations, 32);
+    _ourKey = PrivateKey.fromSeed(Uint8List.fromList(seed));
+    await _storage.write(key: _seedKeyFor(userId), value: base64Encode(seed));
+    await _loadPubKeyCache();
+  }
+
+  static Future<void> initRandomKey(String userId) async {
+    _currentUserId = userId;
+    _boxCache.clear();
+    final rng = Random.secure();
+    final seed = Uint8List.fromList(List.generate(32, (_) => rng.nextInt(256)));
     _ourKey = PrivateKey.fromSeed(Uint8List.fromList(seed));
     await _storage.write(key: _seedKeyFor(userId), value: base64Encode(seed));
     await _loadPubKeyCache();

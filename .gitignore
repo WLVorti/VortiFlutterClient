@@ -39,5 +39,8 @@ Thumbs.db
 *.iml
 .vscode/
 
+# Flutter test artifacts
+flutter_app/flutter_*.png
+
 # Android
 flutter_app/android/.kotlin/

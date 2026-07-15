@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_service.dart';
+import '../services/crypto_service.dart';
 import '../models/models.dart';
 import 'home_screen.dart';
 
@@ -151,6 +152,10 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() { _isLoading = true; _error = null; });
       final result = await widget.api.login(loginValue, password);
       setState(() => _isLoading = false);
+      if (result['token'] != null) {
+        await CryptoService.initWithPassword(password, widget.api.userId!);
+        if (mounted) await CryptoService.uploadPublicKey(widget.api);
+      }
       _handleAuthResult(result);
     } else if (_registerWithEmail) {
       _validateEmail();
@@ -167,6 +172,10 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() { _isLoading = true; _error = null; });
       final result = await widget.api.registerWithEmail(email, password);
       setState(() => _isLoading = false);
+      if (result['token'] != null) {
+        await CryptoService.initWithPassword(password, widget.api.userId!);
+        if (mounted) await CryptoService.uploadPublicKey(widget.api);
+      }
       _handleAuthResult(result);
     } else {
       _validateUsername();
@@ -183,6 +192,10 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() { _isLoading = true; _error = null; });
       final result = await widget.api.register(username, password);
       setState(() => _isLoading = false);
+      if (result['token'] != null) {
+        await CryptoService.initWithPassword(password, widget.api.userId!);
+        if (mounted) await CryptoService.uploadPublicKey(widget.api);
+      }
       _handleAuthResult(result);
     }
   }
@@ -566,6 +579,10 @@ class _AuthScreenState extends State<AuthScreen> {
                           setState(() => _isLoading = false);
                           if (result['status'] == 'success' || result['token'] != null) {
                             final isNew = result['isNew'] == true;
+                            if (widget.api.userId != null) {
+                              await CryptoService.initRandomKey(widget.api.userId!);
+                              if (mounted) await CryptoService.uploadPublicKey(widget.api);
+                            }
                             if (isNew && !widget.isAddingAccount && mounted) {
                               final chosen = await _showUsernameDialog(result['username'] as String? ?? '');
                               if (chosen != null && mounted) {

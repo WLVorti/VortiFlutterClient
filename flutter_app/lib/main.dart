@@ -41,138 +41,6 @@ class VortiApp extends StatefulWidget {
   State<VortiApp> createState() => _VortiAppState();
 }
 
-class _E2EEPassphraseDialog extends StatefulWidget {
-  final String userId;
-  const _E2EEPassphraseDialog({required this.userId});
-
-  @override
-  State<_E2EEPassphraseDialog> createState() => _E2EEPassphraseDialogState();
-}
-
-class _E2EEPassphraseDialogState extends State<_E2EEPassphraseDialog> {
-  final _controller = TextEditingController();
-  final _confirmController = TextEditingController();
-  bool _obscure = true;
-  bool _isNew = false;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    // First ever launch or reinstall — let user decide
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _confirmController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    final phrase = _controller.text.trim();
-    if (phrase.isEmpty) {
-      setState(() => _error = 'Enter a passphrase');
-      return;
-    }
-    if (phrase.length < 4) {
-      setState(() => _error = 'At least 4 characters');
-      return;
-    }
-    if (_isNew && _confirmController.text.trim() != phrase) {
-      setState(() => _error = 'Passphrases do not match');
-      return;
-    }
-    await CryptoService.initWithPassphrase(phrase, widget.userId);
-    if (mounted) Navigator.of(context).pop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return AlertDialog(
-      title: Text(
-        _isNew ? 'Set recovery passphrase' : 'Enter recovery passphrase',
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _isNew
-                  ? 'This passphrase restores your encryption keys on a new device. '
-                        'Save it securely — without it, old private messages become unreadable.'
-                  : 'Enter the passphrase you set on your previous device to restore encryption keys.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _controller,
-              obscureText: _obscure,
-              decoration: const InputDecoration(
-                labelText: 'Recovery passphrase',
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (_) {
-                if (_error != null) setState(() => _error = null);
-              },
-            ),
-            if (_isNew) ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _confirmController,
-                obscureText: _obscure,
-                decoration: const InputDecoration(
-                  labelText: 'Confirm passphrase',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (_) {
-                  if (_error != null) setState(() => _error = null);
-                },
-              ),
-            ],
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-              ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Checkbox(
-                  value: !_obscure,
-                  onChanged: (v) => setState(() => _obscure = !(v ?? false)),
-                ),
-                GestureDetector(
-                  onTap: () => setState(() => _obscure = !_obscure),
-                  child: const Text('Show passphrase'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        if (!_isNew)
-          TextButton(
-            onPressed: () => setState(() => _isNew = true),
-            child: const Text('First time — set new'),
-          ),
-        TextButton(
-          onPressed: () => _isNew ? setState(() => _isNew = false) : _submit(),
-          child: Text(_isNew ? 'Back' : 'Continue'),
-        ),
-        if (_isNew)
-          FilledButton(onPressed: _submit, child: const Text('Set & Continue')),
-      ],
-    );
-  }
-}
-
 class _VortiAppState extends State<VortiApp> {
   final _api = ApiService();
   final _notifications = NotificationService();
@@ -267,25 +135,11 @@ class _VortiAppState extends State<VortiApp> {
       _showResetPasswordFromDeepLink(t);
     }
 
-    // Check E2EE passphrase setup after auth
+    // Load E2EE key if cached
     if (_api.token != null && mounted) {
-      await _ensureE2EE();
+      await CryptoService.initForUser(_api.userId!);
+      ApiService.addLog('_checkAuth: E2EE init result=${CryptoService.isReady}');
     }
-  }
-
-  Future<void> _ensureE2EE() async {
-    final uid = _api.userId;
-    if (uid == null) return;
-    if (await CryptoService.initForUser(uid)) return;
-    if (!mounted) return;
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => _E2EEPassphraseDialog(userId: uid),
-    );
-    if (mounted) setState(() {});
-  }
 
   StreamSubscription<String?>? _tokenSubscription;
 
