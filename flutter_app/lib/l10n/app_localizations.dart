@@ -79,7 +79,7 @@ class AppLocalizations {
   String get logsCopied => isRu ? 'Логи скопированы' : 'Logs copied to clipboard';
   String get entries => isRu ? 'записей' : 'entries';
   String get failedToSend => isRu ? 'Не удалось отправить' : 'Failed to send';
-  String get fileTooLarge => isRu ? 'Файл слишком большой (макс. 10МБ)' : 'File too large (max 10MB)';
+  String get fileTooLarge => isRu ? 'Слишком большой файл, лимит 1 ГБ' : 'File too large, limit 1GB';
   String get uploadFailed => isRu ? 'Ошибка загрузки' : 'Upload failed';
   String get messageTooLong => isRu ? 'Сообщение слишком длинное' : 'Message too long';
   String get editMessageHint => isRu ? 'Редактировать сообщение...' : 'Edit message...';
@@ -137,6 +137,9 @@ class AppLocalizations {
   String get appLanguage => isRu ? 'Язык приложения' : 'App language';
   String get searchMessages => isRu ? 'Поиск сообщений' : 'Search messages';
   String get noChatsYet => isRu ? 'Нет чатов' : 'No chats yet';
+  String get forwardTo => isRu ? 'Переслать в чат' : 'Forward to chat';
+  String get sharedContent => isRu ? 'Отправленный контент' : 'Shared content';
+  String get shareSent => isRu ? 'Отправлено' : 'Sent';
   String get noCommunitiesYet => isRu ? 'Нет сообществ' : 'No communities yet';
   String get noMessagesFound => isRu ? 'Сообщения не найдены' : 'No messages found';
   String get usersNotFound => isRu ? 'Пользователи не найдены' : 'Users not found';

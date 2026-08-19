@@ -14,10 +14,12 @@ import 'services/hidden_chats.dart';
 import 'services/crypto_service.dart';
 import 'services/wallpaper_service.dart';
 import 'services/deep_link_service.dart';
+import 'services/share_receiver.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/chat_screen.dart';
+import 'screens/share_forward_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,13 +49,28 @@ class _VortiAppState extends State<VortiApp> {
   bool _isLoading = true;
   String? _pendingResetToken;
   final _navigatorKey = GlobalKey<NavigatorState>();
+  Future<void> _shareInit = Future.value();
 
   @override
   void initState() {
     super.initState();
     ApiService.init();
+    _shareInit = ShareReceiver.init(_handleSharedContent);
     _checkAuth();
     DeepLinkService().init(_handleDeepLink);
+  }
+
+  void _handleSharedContent(SharedContent content) {
+    if (!mounted || _api.token == null || content.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _navigatorKey.currentContext;
+      if (ctx == null || !mounted) return;
+      Navigator.of(ctx).push(
+        MaterialPageRoute(
+          builder: (_) => ShareForwardScreen(api: _api, content: content),
+        ),
+      );
+    });
   }
 
   void _handleDeepLink(Uri uri) {
@@ -141,6 +158,17 @@ class _VortiAppState extends State<VortiApp> {
       ApiService.addLog('_checkAuth: E2EE init result=${CryptoService.isReady}');
     }
 
+    // Consume share payload received at cold start (opened via "Share")
+    if (_api.token != null && mounted) {
+      await _shareInit;
+      final initial = ShareReceiver.takeInitial();
+      if (initial != null && !initial.isEmpty) {
+        _handleSharedContent(initial);
+        await ShareReceiver.clear();
+      }
+    }
+  }
+
   StreamSubscription<String?>? _tokenSubscription;
 
   Future<void> _initNotifications() async {
@@ -164,9 +192,12 @@ class _VortiAppState extends State<VortiApp> {
     _notifications.onNavigateToChat = (chatId, data) async {
       ApiService.addLog('Notification tapped: chatId=$chatId');
       if (!mounted) return;
+      if (NotificationService.activeChatId == chatId) return;
+      final ctx = _navigatorKey.currentContext;
+      if (ctx == null) return;
       final chat = await _api.getChat(chatId);
-      if (mounted && chat != null) {
-        Navigator.of(context).push(
+      if (mounted && ctx.mounted && chat != null) {
+        Navigator.of(ctx).push(
           MaterialPageRoute(
             builder: (_) => ChatScreen(
               api: _api,

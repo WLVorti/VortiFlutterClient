@@ -14,6 +14,13 @@ import 'theme_provider.dart';
 import 'crypto_service.dart';
 import 'wallpaper_service.dart';
 
+class FileTooLargeException implements Exception {
+  final String message;
+  FileTooLargeException(this.message);
+  @override
+  String toString() => message;
+}
+
 class ApiService {
   static const String baseUrl = 'https://wlvorti.ru:3000';
   static const String wsUrl = 'wss://wlvorti.ru:3000';
@@ -776,10 +783,13 @@ class ApiService {
     }
   }
 
-  Future<List<Message>> getMessages(String chatId, {int limit = 50, int? before}) async {
-    final uri = Uri.parse('$baseUrl/chats/$chatId/messages').replace(queryParameters: {
+  Future<List<Message>> getMessages(String chatId,
+      {int limit = 50, int? before, int? after}) async {
+    final uri = Uri.parse('$baseUrl/chats/$chatId/messages')
+        .replace(queryParameters: {
       'limit': limit.toString(),
       if (before != null) 'before': before.toString(),
+      if (after != null) 'after': after.toString(),
     });
     final res = await _client.get(uri, headers: _headers);
 
@@ -1036,6 +1046,19 @@ class ApiService {
     _wsChannel?.sink.add(jsonEncode({'type': 'ping'}));
   }
 
+  /// Сообщает серверу, какой чат сейчас открыт на экране (или null/undefined,
+  /// если ни один чат не открыт). Сервер использует это для решения,
+  /// отправлять ли push-уведомление о новых сообщениях.
+  void setActiveChat(String? chatId) {
+    if (_wsChannel?.sink == null) return;
+    try {
+      _wsChannel!.sink.add(jsonEncode({
+        'type': 'activeChat',
+        'chatId': chatId,
+      }));
+    } catch (_) {}
+  }
+
   void sendRead(String messageId) {
     _wsChannel?.sink.add(jsonEncode({'type': 'read', 'messageId': messageId}));
   }
@@ -1068,33 +1091,41 @@ class ApiService {
 
   // ==================== Files ====================
 
-  Future<Map<String, String>?> uploadFile(File file) async {
+  Future<Map<String, String>?> uploadFile(File file, {String? mimeType}) async {
     final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload'));
 
     request.headers.addAll({'Authorization': 'Bearer $_token'});
 
-    final mimeType = _getMimeType(file.path);
+    final contentType = mimeType ?? _getMimeType(file.path);
     request.files.add(
       await http.MultipartFile.fromPath(
         'file',
         file.path,
-        contentType: MediaType.parse(mimeType),
+        contentType: MediaType.parse(contentType),
       ),
     );
 
     final streamedResponse = await request.send();
     final response = await http.Response.fromStream(streamedResponse);
-    final data = jsonDecode(response.body);
+    Map<String, dynamic> data = {};
+    try {
+      data = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {}
 
     if (response.statusCode == 200 || response.statusCode == 201) {
-      return {'fileId': data['fileId'], 'mimeType': mimeType};
+      return {'fileId': data['fileId'], 'mimeType': contentType};
+    }
+    if (response.statusCode == 413) {
+      throw FileTooLargeException(
+        data['message'] as String? ?? 'File too large (max 1 GB)',
+      );
     }
     return null;
   }
 
-  Future<Map<String, String>?> uploadFileChunked(File file, {int chunkSize = 2 * 1024 * 1024, int concurrency = 3, void Function(double progress)? onProgress}) async {
+  Future<Map<String, String>?> uploadFileChunked(File file, {int chunkSize = 2 * 1024 * 1024, int concurrency = 3, void Function(double progress)? onProgress, String? mimeType}) async {
     final fileName = file.path.split(Platform.pathSeparator).last;
-    final mimeType = _getMimeType(file.path);
+    final contentType = mimeType ?? _getMimeType(file.path);
     final totalSize = await file.length();
     int completedBytes = 0;
 
@@ -1108,10 +1139,17 @@ class ApiService {
     final initResp = await http.post(
       Uri.parse('$baseUrl/upload/init'),
       headers: {'Authorization': 'Bearer $_token', 'Content-Type': 'application/json'},
-      body: jsonEncode({'name': fileName, 'mimeType': mimeType}),
+      body: jsonEncode({'name': fileName, 'mimeType': contentType}),
     );
     if (initResp.statusCode != 200) {
       logs.add('[uploadChunked] init failed: ${initResp.statusCode} ${initResp.body}');
+      if (initResp.statusCode == 413) {
+        String msg = 'File too large (max 1 GB)';
+        try {
+          msg = (jsonDecode(initResp.body)['message'] as String?) ?? msg;
+        } catch (_) {}
+        throw FileTooLargeException(msg);
+      }
       return null;
     }
     final uploadId = jsonDecode(initResp.body)['uploadId'] as String;
@@ -1159,6 +1197,13 @@ class ApiService {
     );
     if (completeResp.statusCode != 200) {
       logs.add('[uploadChunked] complete failed: ${completeResp.statusCode} ${completeResp.body}');
+      if (completeResp.statusCode == 413) {
+        String msg = 'File too large (max 1 GB)';
+        try {
+          msg = (jsonDecode(completeResp.body)['message'] as String?) ?? msg;
+        } catch (_) {}
+        throw FileTooLargeException(msg);
+      }
       return null;
     }
     final completeData = jsonDecode(completeResp.body);
@@ -1632,6 +1677,8 @@ class ApiService {
     _reconnectAttempts = 0;
     connectWebSocket();
   }
+
+  bool get isWsActive => _wsChannel != null && !_isConnecting;
 
   Future<bool> registerDevice(
     String token,

@@ -26,7 +26,7 @@ import '../services/message_cache.dart';
 import '../services/mute_service.dart';
 import '../services/crypto_service.dart';
 import '../services/wallpaper_service.dart';
-import '../services/sound_service.dart';
+import '../services/notification_service.dart';
 import '../models/models.dart';
 import 'user_profile_screen.dart';
 import 'group_info_screen.dart';
@@ -103,7 +103,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? _pendingFileName;
   String? _pendingFileMimeType;
   String? _wallpaperPath;
-  final _soundService = SoundService();
 
   final _threeDotKey = GlobalKey<State>();
 
@@ -135,7 +134,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _currentUserId = widget.api.userId ?? '';
     _wallpaperPath = WallpaperService().wallpaperPath;
-    _soundService.init();
     _loadQuickReaction();
     _loadCachedMessages();
     _loadMessages();
@@ -143,11 +141,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadDraft();
     _loadMuteStatus();
     widget.api.addMessageListener(_handleMessage);
-    widget.api.onReconnected = _refreshMessageStatus;
+    widget.api.onReconnected = _handleReconnected;
+    widget.api.setActiveChat(widget.chatId);
+    NotificationService.setActiveChat(widget.chatId);
     _scrollController.addListener(_onScroll);
     if (widget.chatType == 'group') {
       _loadParticipantNames();
     }
+  }
+
+  void _handleReconnected() {
+    _refreshMessageStatus();
+    widget.api.setActiveChat(widget.chatId);
   }
 
   Future<void> _loadCachedMessages() async {
@@ -224,8 +229,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     if (state == AppLifecycleState.resumed) {
       _isAppActive = true;
-      widget.api.reconnectWebSocket();
+      if (!widget.api.isWsActive) {
+        widget.api.reconnectWebSocket();
+      }
       _refreshMessageStatus();
+      widget.api.setActiveChat(widget.chatId);
     }
 
     if (state == AppLifecycleState.paused) {
@@ -233,6 +241,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _readDebounce?.cancel();
       _pendingReadIds.clear();
       widget.api.sendPing();
+      widget.api.setActiveChat(null);
     }
   }
 
@@ -370,8 +379,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           } else {
             _showSnackBar('Upload failed');
           }
-        } catch (_) {
-          _showSnackBar('Upload failed');
+        } catch (e) {
+          if (e is FileTooLargeException) {
+            _showSnackBar(AppLocalizations.of(context).fileTooLarge);
+          } else {
+            _showSnackBar('Upload failed');
+          }
         }
 
         setState(() => _isUploading = false);
@@ -498,6 +511,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _insertMessageSorted(Message message) {
+    var lo = 0;
+    var hi = _messages.length;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (_messages[mid].createdAt <= message.createdAt) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    _messages.insert(lo, message);
+  }
+
   void _handleNewMessage(Map<String, dynamic> msg) {
     final messageId = msg['id'] as String;
     final tempId = msg['tempId'] as String?;
@@ -558,7 +585,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
 
       // 4) Add the real message once
-      _messages.add(message);
+      _insertMessageSorted(message);
       MessageCache.saveMessage(message);
 
       // 5) Mark for read receipts
@@ -568,7 +595,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     if (userId != _currentUserId) {
-      _soundService.playReceive();
       _scheduleReadReceipts();
       widget.onMessagesRead?.call();
     }
@@ -715,7 +741,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _loadMessages() async {
     if (_messagesLoaded) return;
     try {
-      final messages = await widget.api.getMessages(widget.chatId);
+      // Догружаем с сервера только сообщения новее последнего из кэша,
+      // чтобы чат открывался мгновенно из памяти, а сеть тратилась лишь на дельту.
+      final latestCached =
+          _messages.isNotEmpty ? _messages.last.createdAt : null;
+      final messages = latestCached != null
+          ? await widget.api.getMessages(
+              widget.chatId,
+              after: latestCached,
+              limit: 100,
+            )
+          : await widget.api.getMessages(widget.chatId);
       if (mounted) {
         setState(() {
           final now = DateTime.now().millisecondsSinceEpoch;
@@ -745,7 +781,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
           _isLoading = false;
           _messagesLoaded = true;
-          _hasOlderMessages = messages.length >= 50;
+          if (latestCached == null) {
+            _hasOlderMessages = messages.length >= 50;
+          } else {
+            _hasOlderMessages = true;
+          }
 
           for (final m in messages) {
             if (m.userId != _currentUserId && !_readMessages.contains(m.id)) {
@@ -812,8 +852,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             actuallyAdded.add(m);
           }
         }
-        if (actuallyAdded.length > 1) {
-          _messages.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        if (actuallyAdded.isNotEmpty) {
+          _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
         }
       });
       if (actuallyAdded.isEmpty) return;
@@ -860,6 +900,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       for (final m in toInsert) {
         _decryptMessage(m);
       }
+      MessageCache.saveMessages(widget.chatId, toInsert);
     } catch (e) {
       if (mounted) setState(() => _isLoadingMore = false);
     }
@@ -940,7 +981,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       try {
         final fileSize = await _pendingFile!.length();
         final sizeMb = (fileSize / (1024 * 1024)).toStringAsFixed(1);
-        if (fileSize > 100 * 1024 * 1024) {
+        if (fileSize > 1024 * 1024 * 1024) {
           _showSnackBar(AppLocalizations.of(context).fileTooLarge);
           setState(() => _isUploading = false);
           return;
@@ -976,7 +1017,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           return;
         }
       } catch (e) {
-        _showSnackBar(AppLocalizations.of(context).uploadFailed);
+        if (e is FileTooLargeException) {
+          _showSnackBar(AppLocalizations.of(context).fileTooLarge);
+        } else {
+          _showSnackBar(AppLocalizations.of(context).uploadFailed);
+        }
         setState(() => _isUploading = false);
         return;
       }
@@ -1025,7 +1070,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     });
     _scrollToBottom(force: true);
-    _soundService.playSend();
 
     // Send via WebSocket with tempId
     widget.api.sendMessage(
@@ -1254,7 +1298,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) break;
       try {
         final fileSize = await media.file.length();
-        if (fileSize > 100 * 1024 * 1024) {
+        if (fileSize > 1024 * 1024 * 1024) {
           _showSnackBar(AppLocalizations.of(context).fileTooLarge);
           continue;
         }
@@ -1271,8 +1315,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             mimeType: uploadResult['mimeType'],
           );
         }
-      } catch (_) {
-        _showSnackBar(AppLocalizations.of(context).uploadFailed);
+      } catch (e) {
+        if (e is FileTooLargeException) {
+          _showSnackBar(AppLocalizations.of(context).fileTooLarge);
+        } else {
+          _showSnackBar(AppLocalizations.of(context).uploadFailed);
+        }
       }
     }
   }
@@ -1461,14 +1509,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _editController.dispose();
     _scrollController.dispose();
     widget.api.removeMessageListener(_handleMessage);
-    if (widget.api.onReconnected == _refreshMessageStatus) {
+    widget.api.setActiveChat(null);
+    if (NotificationService.activeChatId == widget.chatId) {
+      NotificationService.setActiveChat(null);
+    }
+    if (widget.api.onReconnected == _handleReconnected) {
       widget.api.onReconnected = null;
     }
     for (final player in _audioPlayers.values) {
       player.dispose();
     }
     _audioPlayers.clear();
-    _soundService.dispose();
     super.dispose();
   }
 
@@ -4204,7 +4255,16 @@ class _VideoFullscreenPlayerState extends State<_VideoFullscreenPlayer> {
   @override
   void initState() {
     super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initVideo();
+  }
+
+  @override
+  void dispose() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _controller.removeListener(_onVideoUpdate);
+    _controller.dispose();
+    super.dispose();
   }
 
   Future<void> _initVideo() async {
@@ -4242,13 +4302,6 @@ class _VideoFullscreenPlayerState extends State<_VideoFullscreenPlayer> {
         _maxPosition = duration > 0 ? duration : 1;
       });
     }
-  }
-
-  @override
-  void dispose() {
-    _controller.removeListener(_onVideoUpdate);
-    _controller.dispose();
-    super.dispose();
   }
 
   void _togglePlayPause() {
@@ -4302,107 +4355,115 @@ class _VideoFullscreenPlayerState extends State<_VideoFullscreenPlayer> {
               Positioned.fill(
                 child: Container(
                   color: Colors.black.withValues(alpha: 0.3),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if (_controller.value.isPlaying)
-                        const SizedBox(height: 60),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            Text(
-                              _formatDuration(
-                                Duration(
-                                  milliseconds: _currentPosition.toInt(),
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (_controller.value.isPlaying)
+                          const SizedBox(height: 60),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              Text(
+                                _formatDuration(
+                                  Duration(
+                                    milliseconds: _currentPosition.toInt(),
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
                                 ),
                               ),
-                              style: const TextStyle(
+                              Expanded(
+                                child: Slider(
+                                  value: _currentPosition.clamp(0, _maxPosition),
+                                  min: 0,
+                                  max: _maxPosition > 0 ? _maxPosition : 1,
+                                  onChanged: (value) {
+                                    _controller.seekTo(
+                                      Duration(milliseconds: value.toInt()),
+                                    );
+                                    setState(() {
+                                      _currentPosition = value;
+                                    });
+                                  },
+                                ),
+                              ),
+                              Text(
+                                _formatDuration(
+                                  Duration(milliseconds: _maxPosition.toInt()),
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              onPressed: () {
+                                final newPosition =
+                                    _controller.value.position -
+                                    const Duration(seconds: 10);
+                                _controller.seekTo(newPosition);
+                              },
+                              icon: const Icon(
+                                Icons.replay_10,
                                 color: Colors.white,
-                                fontSize: 12,
+                                size: 36,
                               ),
                             ),
-                            Expanded(
-                              child: Slider(
-                                value: _currentPosition.clamp(0, _maxPosition),
-                                min: 0,
-                                max: _maxPosition > 0 ? _maxPosition : 1,
-                                onChanged: (value) {
-                                  _controller.seekTo(
-                                    Duration(milliseconds: value.toInt()),
-                                  );
-                                  setState(() {
-                                    _currentPosition = value;
-                                  });
-                                },
+                            const SizedBox(width: 24),
+                            IconButton(
+                              onPressed: _togglePlayPause,
+                              icon: Icon(
+                                _controller.value.isPlaying
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
+                                color: Colors.white,
+                                size: 48,
                               ),
                             ),
-                            Text(
-                              _formatDuration(
-                                Duration(milliseconds: _maxPosition.toInt()),
-                              ),
-                              style: const TextStyle(
+                            const SizedBox(width: 24),
+                            IconButton(
+                              onPressed: () {
+                                final newPosition =
+                                    _controller.value.position +
+                                    const Duration(seconds: 10);
+                                _controller.seekTo(newPosition);
+                              },
+                              icon: const Icon(
+                                Icons.forward_10,
                                 color: Colors.white,
-                                fontSize: 12,
+                                size: 36,
                               ),
                             ),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            onPressed: () {
-                              final newPosition =
-                                  _controller.value.position -
-                                  const Duration(seconds: 10);
-                              _controller.seekTo(newPosition);
-                            },
-                            icon: const Icon(
-                              Icons.replay_10,
-                              color: Colors.white,
-                              size: 36,
-                            ),
-                          ),
-                          const SizedBox(width: 24),
-                          IconButton(
-                            onPressed: _togglePlayPause,
-                            icon: Icon(
-                              _controller.value.isPlaying
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              color: Colors.white,
-                              size: 48,
-                            ),
-                          ),
-                          const SizedBox(width: 24),
-                          IconButton(
-                            onPressed: () {
-                              final newPosition =
-                                  _controller.value.position +
-                                  const Duration(seconds: 10);
-                              _controller.seekTo(newPosition);
-                            },
-                            icon: const Icon(
-                              Icons.forward_10,
-                              color: Colors.white,
-                              size: 36,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
             Positioned(
-              top: 40,
-              left: 16,
-              child: IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+              top: 0,
+              left: 0,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                  ),
+                ),
               ),
             ),
           ],

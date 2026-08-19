@@ -299,7 +299,7 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
           radius: 22,
           backgroundColor: colorFromId(user.id),
           backgroundImage: user.avatarUrl != null
-              ? CachedNetworkImageProvider(user.avatarUrl!)
+              ? CachedNetworkImageProvider('${ApiService.baseUrl}${user.avatarUrl}')
               : null,
           child: user.avatarUrl == null
               ? Text(

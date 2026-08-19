@@ -13,6 +13,9 @@ final FlutterLocalNotificationsPlugin _localPlugin =
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+  // Когда приложение в фоне, уведомление с полем 'notification' Android
+  // показывает сам по себе — здесь его не дублируем, иначе будет два уведа.
+  if (message.notification != null) return;
   final plugin = FlutterLocalNotificationsPlugin();
   await plugin.initialize(const InitializationSettings(
     android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -59,6 +62,13 @@ class NotificationService {
   NotificationService._internal();
 
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+
+  /// ID чата, открытого сейчас на экране (null — ни один не открыт).
+  /// Используется, чтобы не показывать уведомление о сообщении,
+  /// когда пользователь уже видит этот чат.
+  static String? activeChatId;
+
+  static void setActiveChat(String? chatId) => activeChatId = chatId;
 
   Function(String, Map<String, dynamic>)? onNavigateToChat;
 
@@ -132,6 +142,8 @@ class NotificationService {
     if (kDebugMode) {
       print('Foreground message: ${message.notification?.title}');
     }
+    final chatId = message.data['chatId'];
+    if (chatId != null && chatId != '' && chatId == activeChatId) return;
     _showNotification(_localPlugin, message);
   }
 

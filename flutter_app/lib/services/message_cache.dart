@@ -11,7 +11,7 @@ class MessageCache {
     final dir = await getApplicationDocumentsDirectory();
     _db = await openDatabase(
       p.join(dir.path, 'messages_cache.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE messages (
@@ -24,6 +24,10 @@ class MessageCache {
             reply_username TEXT,
             file_id TEXT,
             file_mime_type TEXT,
+            sticker_id TEXT,
+            sticker_image_url TEXT,
+            sticker_emoji TEXT,
+            sticker_pack_id TEXT,
             created_at INTEGER NOT NULL,
             is_deleted INTEGER NOT NULL DEFAULT 0,
             is_edited INTEGER NOT NULL DEFAULT 0,
@@ -42,6 +46,12 @@ class MessageCache {
         if (oldVersion < 3) {
           await db.execute("ALTER TABLE messages ADD COLUMN plain_text TEXT");
         }
+        if (oldVersion < 4) {
+          await db.execute("ALTER TABLE messages ADD COLUMN sticker_id TEXT");
+          await db.execute("ALTER TABLE messages ADD COLUMN sticker_image_url TEXT");
+          await db.execute("ALTER TABLE messages ADD COLUMN sticker_emoji TEXT");
+          await db.execute("ALTER TABLE messages ADD COLUMN sticker_pack_id TEXT");
+        }
       },
     );
   }
@@ -51,7 +61,7 @@ class MessageCache {
     _db = null;
   }
 
-  static Future<List<Message>> getMessages(String chatId, {int limit = 50}) async {
+  static Future<List<Message>> getMessages(String chatId, {int? limit}) async {
     final db = _db;
     if (db == null) return [];
     final rows = await db.query(

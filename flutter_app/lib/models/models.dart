@@ -63,7 +63,7 @@ class User {
       username: json['username'] ?? '',
       displayName: json['displayName'] ?? json['username'],
       bio: json['bio'],
-      avatarUrl: json['avatarUrl'],
+      avatarUrl: json['avatarUrl'] ?? json['avatar_url'],
       createdAt: json['created_at'] ?? 0,
       isOnline: json['is_online'] ?? false,
       lastSeenAt: json['last_seen_at'],
